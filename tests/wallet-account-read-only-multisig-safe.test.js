@@ -18,6 +18,8 @@ import { describe, expect, test, jest } from '@jest/globals'
 
 import { AbiCoder } from 'ethers'
 
+import { InvalidTokenError } from '@tetherto/wdk-wallet'
+
 import { WalletAccountReadOnlyMultisigSafe, SafeTxServiceCoordinator } from '../index.js'
 
 const ACCOUNT = {
@@ -581,8 +583,10 @@ describe('WalletAccountReadOnlyMultisigSafe', () => {
         sendRPCRequest: jest.fn().mockResolvedValue({ paymasterMetadata: { address: '0x' + 'cd'.repeat(20) }, tokens: [] })
       })
 
-      await expect(account.quoteExecuteProposal(MOCK_SAFE_OP_HASH))
-        .rejects.toThrow(`The paymaster does not support the token ${PAYMASTER_TOKEN_ADDRESS}.`)
+      const promise = account.quoteExecuteProposal(MOCK_SAFE_OP_HASH)
+
+      await expect(promise).rejects.toThrow(InvalidTokenError)
+      await expect(promise).rejects.toThrow(`The paymaster does not support the token set in the 'paymasterTokenAddress' option: ${PAYMASTER_TOKEN_ADDRESS}.`)
     })
   })
 
