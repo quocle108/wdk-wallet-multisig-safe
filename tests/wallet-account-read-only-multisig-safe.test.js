@@ -472,9 +472,9 @@ describe('WalletAccountReadOnlyMultisigSafe', () => {
   })
 
   describe('quoteExecuteProposal', () => {
-    const PAYMASTER_TOKEN_ADDRESS = '0x1234567890abcdef1234567890abcdef12345678'
+    const PAYMASTER_TOKEN_ADDRESS = '0x1234567890AbcdEF1234567890aBcdef12345678'
     const ENTRY_POINT_ADDRESS = '0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789'
-    const DUMMY_EXCHANGE_RATE = '2000000000'
+    const DUMMY_EXCHANGE_RATE = '0x77359400'
 
     const DUMMY_USER_OPERATION = {
       nonce: '0',
@@ -533,7 +533,7 @@ describe('WalletAccountReadOnlyMultisigSafe', () => {
       const PAYMASTER_URL = 'https://api.candide.dev/paymaster/v3/sepolia/dummy-key'
       const DUMMY_SUPPORTED_TOKENS = {
         paymasterMetadata: { address: '0x' + 'cd'.repeat(20) },
-        tokens: [{ address: PAYMASTER_TOKEN_ADDRESS, exchangeRate: DUMMY_EXCHANGE_RATE }]
+        tokens: [{ address: PAYMASTER_TOKEN_ADDRESS.toLowerCase(), exchangeRate: DUMMY_EXCHANGE_RATE }]
       }
       const account = createAccount({ paymasterUrl: PAYMASTER_URL, paymasterTokenAddress: PAYMASTER_TOKEN_ADDRESS }, DUMMY_PAYMASTER_USER_OPERATION)
       const sendRPCRequestMock = jest.fn().mockResolvedValue(DUMMY_SUPPORTED_TOKENS)

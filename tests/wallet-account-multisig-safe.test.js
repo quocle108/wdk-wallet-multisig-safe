@@ -535,41 +535,52 @@ describe('WalletAccountMultisigSafe', () => {
       expect(result).toEqual({ hash: MOCK_USER_OP_HASH, fee: EXPECTED_FEE })
     })
 
-    test('should return the fee in token units when the Safe pays with a paymaster token', async () => {
+    describe('when the Safe pays gas with a paymaster token', () => {
       const PAYMASTER_URL = 'https://api.candide.dev/paymaster/v3/sepolia/dummy-key'
-      const PAYMASTER_TOKEN_ADDRESS = '0x1234567890abcdef1234567890abcdef12345678'
+      const PAYMASTER_TOKEN_ADDRESS = '0x1234567890AbcdEF1234567890aBcdef12345678'
       const ENTRY_POINT_ADDRESS = '0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789'
       const DUMMY_SUPPORTED_TOKENS = {
         paymasterMetadata: { address: '0x' + 'cd'.repeat(20) },
-        tokens: [{ address: PAYMASTER_TOKEN_ADDRESS, exchangeRate: '2000000000' }]
+        tokens: [{ address: PAYMASTER_TOKEN_ADDRESS.toLowerCase(), exchangeRate: '0x77359400' }]
       }
-      const EXPECTED_FEE = 900000n
 
-      const erc20Account = new WalletAccountMultisigSafe(SEED_PHRASE, "0'/0/0", {
-        ...MOCK_CONFIG,
-        paymasterUrl: PAYMASTER_URL,
-        paymasterTokenAddress: PAYMASTER_TOKEN_ADDRESS,
-        safeOptions: { owners: [ACCOUNT.address], threshold: 1 }
-      })
-      const sendRPCRequestMock = jest.fn().mockResolvedValue(DUMMY_SUPPORTED_TOKENS)
-      erc20Account._coordinator = createMockCoordinator({
-        getProposal: jest.fn().mockResolvedValue({
-          confirmations: [{ owner: ACCOUNT.address }],
-          userOperation: { ...DUMMY_USER_OPERATION, paymasterAndData: '0x' + 'ab'.repeat(40) },
-          preparedSignature: '0xpreparedsignature'
+      let erc20Account
+
+      beforeEach(() => {
+        erc20Account = new WalletAccountMultisigSafe(SEED_PHRASE, "0'/0/0", {
+          ...MOCK_CONFIG,
+          paymasterUrl: PAYMASTER_URL,
+          paymasterTokenAddress: PAYMASTER_TOKEN_ADDRESS,
+          safeOptions: { owners: [ACCOUNT.address], threshold: 1 }
         })
       })
-      erc20Account._getProposalId = jest.fn().mockReturnValue(MOCK_SAFE_OP_HASH)
-      erc20Account._getBundler = jest.fn().mockReturnValue(createMockBundler())
-      erc20Account._getPaymaster = jest.fn().mockReturnValue({ sendRPCRequest: sendRPCRequestMock })
-      erc20Account._threshold = 1
 
-      const result = await erc20Account.executeProposal(MOCK_SAFE_OP_HASH)
+      afterEach(() => {
+        erc20Account.dispose()
+      })
 
-      expect(erc20Account._getPaymaster).toHaveBeenCalledWith(PAYMASTER_URL, { chainId: 11155111n })
-      expect(sendRPCRequestMock).toHaveBeenCalledWith('pm_supportedERC20Tokens', [ENTRY_POINT_ADDRESS])
-      expect(result).toEqual({ hash: MOCK_USER_OP_HASH, fee: EXPECTED_FEE })
-      erc20Account.dispose()
+      test('should return the fee in token units', async () => {
+        const EXPECTED_FEE = 900000n
+
+        const sendRPCRequestMock = jest.fn().mockResolvedValue(DUMMY_SUPPORTED_TOKENS)
+        erc20Account._coordinator = createMockCoordinator({
+          getProposal: jest.fn().mockResolvedValue({
+            confirmations: [{ owner: ACCOUNT.address }],
+            userOperation: { ...DUMMY_USER_OPERATION, paymasterAndData: '0x' + 'ab'.repeat(40) },
+            preparedSignature: '0xpreparedsignature'
+          })
+        })
+        erc20Account._getProposalId = jest.fn().mockReturnValue(MOCK_SAFE_OP_HASH)
+        erc20Account._getBundler = jest.fn().mockReturnValue(createMockBundler())
+        erc20Account._getPaymaster = jest.fn().mockReturnValue({ sendRPCRequest: sendRPCRequestMock })
+        erc20Account._threshold = 1
+
+        const result = await erc20Account.executeProposal(MOCK_SAFE_OP_HASH)
+
+        expect(erc20Account._getPaymaster).toHaveBeenCalledWith(PAYMASTER_URL, { chainId: 11155111n })
+        expect(sendRPCRequestMock).toHaveBeenCalledWith('pm_supportedERC20Tokens', [ENTRY_POINT_ADDRESS])
+        expect(result).toEqual({ hash: MOCK_USER_OP_HASH, fee: EXPECTED_FEE })
+      })
     })
 
     test('should call sendUserOperation on the bundler', async () => {
