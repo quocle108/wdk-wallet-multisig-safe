@@ -14,7 +14,7 @@
 
 'use strict'
 
-import { keccak256, toUtf8Bytes, hashMessage, Interface, JsonRpcProvider } from 'ethers'
+import { keccak256, toUtf8Bytes, hashMessage, Interface, JsonRpcProvider, toQuantity } from 'ethers'
 
 import { WalletAccountReadOnly, NoSuchElementError, ValueError } from '@tetherto/wdk-wallet'
 
@@ -136,6 +136,9 @@ const PaymasterMode = {
 }
 
 const EIP1271_MAGIC_VALUE = '0x1626ba7e'
+
+// Paymaster exchange rates are scaled by 10^18: the value of one native coin in the token's smallest unit.
+const EXCHANGE_RATE_SCALE = 10n ** 18n
 
 /**
  * Read-only multisig Safe wallet account.
@@ -595,8 +598,9 @@ export default class WalletAccountReadOnlyMultisigSafe extends WalletAccountRead
    * Quotes the on-chain cost of executing a pending proposal.
    *
    * @param {string} proposalId - The proposal's id
-   * @returns {Promise<Omit<TransactionResult, 'hash'>>} The execution cost estimate
+   * @returns {Promise<Omit<TransactionResult, 'hash'>>} The execution cost estimate, in the asset the Safe pays gas with: zero when sponsored, paymaster token units when paying with a token, wei otherwise.
    * @throws {NoSuchElementError} If no proposal exists for the given id.
+   * @throws {Error} If the paymaster does not support the configured token.
    */
   async quoteExecuteProposal (proposalId) {
     const safeOperation = await this._coordinator.getProposal(proposalId)
@@ -607,7 +611,7 @@ export default class WalletAccountReadOnlyMultisigSafe extends WalletAccountRead
 
     const userOp = this._rebuildUserOperation(safeOperation.userOperation)
 
-    return { fee: this._getMaxGasCost(userOp) }
+    return { fee: await this._getExecutionFee(userOp) }
   }
 
   /**
@@ -633,12 +637,55 @@ export default class WalletAccountReadOnlyMultisigSafe extends WalletAccountRead
     }
   }
 
+  /**
+   * Returns the maximum cost of executing a user operation, in the asset the Safe pays gas with: zero when the
+   * account is sponsored, paymaster token units when the account pays with a token and the operation carries a
+   * paymaster, and wei otherwise.
+   *
+   * @protected
+   * @param {UserOperationV7} userOperation - The user operation to execute.
+   * @returns {Promise<bigint>} The maximum execution cost.
+   * @throws {Error} If the paymaster does not support the configured token.
+   */
+  async _getExecutionFee (userOperation) {
+    const maxGasCost = this._getMaxGasCost(userOperation)
+
+    if (!WalletAccountReadOnlyMultisigSafe._hasPaymaster(userOperation)) return maxGasCost
+
+    const mode = WalletAccountReadOnlyMultisigSafe._resolvePaymasterMode(this._config)
+
+    if (mode === PaymasterMode.SPONSORED) return 0n
+    if (mode === PaymasterMode.NATIVE) return maxGasCost
+
+    const exchangeRate = await this._fetchPaymasterExchangeRate()
+
+    return exchangeRate === null ? maxGasCost : exchangeRate * maxGasCost / EXCHANGE_RATE_SCALE
+  }
+
+  /** @private */
+  async _fetchPaymasterExchangeRate () {
+    const { paymasterUrl, paymasterTokenAddress, chainId } = this._config
+    const provider = WalletAccountReadOnlyMultisigSafe._detectProvider(paymasterUrl)
+
+    if (provider === null) return null
+
+    const paymaster = this._getPaymaster(paymasterUrl, { chainId: BigInt(chainId) })
+    const entrypoint = this._entryPointAddress()
+
+    if (provider === 'pimlico') {
+      const { quotes } = await paymaster.sendRPCRequest('pimlico_getTokenQuotes', [{ tokens: [paymasterTokenAddress] }, entrypoint, toQuantity(chainId)])
+      return WalletAccountReadOnlyMultisigSafe._findExchangeRate(quotes, 'token', paymasterTokenAddress)
+    }
+
+    const { tokens } = await paymaster.sendRPCRequest('pm_supportedERC20Tokens', [entrypoint])
+    return WalletAccountReadOnlyMultisigSafe._findExchangeRate(tokens, 'address', paymasterTokenAddress)
+  }
+
   /** @private */
   _getMaxGasCost (userOperation) {
     const cost = calculateUserOperationMaxGasCost(userOperation)
-    const hasPaymaster = userOperation.paymasterAndData !== undefined && userOperation.paymasterAndData !== '0x'
 
-    if (!hasPaymaster) {
+    if (!WalletAccountReadOnlyMultisigSafe._hasPaymaster(userOperation)) {
       return cost + userOperation.verificationGasLimit * userOperation.maxFeePerGas
     }
 
@@ -938,6 +985,22 @@ export default class WalletAccountReadOnlyMultisigSafe extends WalletAccountRead
     }
 
     return overrides
+  }
+
+  /** @private */
+  static _hasPaymaster (userOperation) {
+    return userOperation.paymasterAndData !== undefined && userOperation.paymasterAndData !== '0x'
+  }
+
+  /** @private */
+  static _findExchangeRate (quotes, addressField, tokenAddress) {
+    const quote = quotes.find(candidate => candidate[addressField].toLowerCase() === tokenAddress.toLowerCase())
+
+    if (quote === undefined) {
+      throw new Error(`The paymaster does not support the token ${tokenAddress}.`)
+    }
+
+    return BigInt(quote.exchangeRate)
   }
 
   /** @private */
