@@ -247,8 +247,9 @@ export default class WalletAccountReadOnlyMultisigSafe extends WalletAccountRead
      * Quotes the on-chain cost of executing a pending proposal.
      *
      * @param {string} proposalId - The proposal's id
-     * @returns {Promise<Omit<TransactionResult, 'hash'>>} The execution cost estimate
-     * @throws {Error} If no proposal exists for the given id.
+     * @returns {Promise<Omit<TransactionResult, 'hash'>>} The execution cost estimate, in the asset the Safe pays gas with: zero when sponsored, paymaster token units when paying with a token, wei otherwise.
+     * @throws {NoSuchElementError} If no proposal exists for the given id.
+     * @throws {Error} If the paymaster does not support the configured token.
      */
     quoteExecuteProposal(proposalId: string): Promise<Omit<TransactionResult, "hash">>;
     /**
@@ -259,6 +260,19 @@ export default class WalletAccountReadOnlyMultisigSafe extends WalletAccountRead
      * @returns {UserOperationV7} The UserOperation with BigInt numeric fields.
      */
     protected _rebuildUserOperation(userOperation: UserOperationV7): UserOperationV7;
+    /**
+     * Returns the maximum cost of executing a user operation, in the asset the Safe pays gas with: zero when the
+     * account is sponsored, paymaster token units when the account pays with a token and the operation carries a
+     * paymaster, and wei otherwise.
+     *
+     * @protected
+     * @param {UserOperationV7} userOperation - The user operation to execute.
+     * @returns {Promise<bigint>} The maximum execution cost.
+     * @throws {Error} If the paymaster does not support the configured token.
+     */
+    protected _getExecutionFee(userOperation: UserOperationV7): Promise<bigint>;
+    /** @private */
+    private _fetchPaymasterExchangeRate;
     /** @private */
     private _getMaxGasCost;
     /**
