@@ -540,7 +540,7 @@ describe('WalletAccountMultisigSafe', () => {
     describe('when the Safe pays gas with a paymaster token', () => {
       const PAYMASTER_URL = 'https://api.candide.dev/paymaster/v3/sepolia/dummy-key'
       const PAYMASTER_TOKEN_ADDRESS = '0xd077A400968890Eacc75cdc901F0356c943e4fDb'
-      const DUMMY_USER_OPERATION = JSON.parse(readFileSync(new URL('./fixtures/candide-token-sepolia.json', import.meta.url), 'utf8')).userOperation
+      const DUMMY_TOKEN_USER_OPERATION = JSON.parse(readFileSync(new URL('./fixtures/candide-token-sepolia.json', import.meta.url), 'utf8')).userOperation
       const DUMMY_GET_TOKENS_RESULT = '0x000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000020000000000000000000000000d077a400968890eacc75cdc901f0356c943e4fdb000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000a000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000005afd67f2dc0e1b2e0000000000000000000000000000000000000000000000000000000000000000000000'
 
       let erc20Account
@@ -564,7 +564,7 @@ describe('WalletAccountMultisigSafe', () => {
         erc20Account._coordinator = createMockCoordinator({
           getProposal: jest.fn().mockResolvedValue({
             confirmations: [{ owner: ACCOUNT.address }],
-            userOperation: DUMMY_USER_OPERATION,
+            userOperation: DUMMY_TOKEN_USER_OPERATION,
             preparedSignature: '0xpreparedsignature'
           })
         })

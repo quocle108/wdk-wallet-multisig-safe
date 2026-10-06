@@ -93,7 +93,7 @@ import { ConfigurationError } from './errors.js'
  * @typedef {Object} MultisigSafeWalletPaymasterTokenConfig
  * @property {false} [isSponsored] - Whether the paymaster is sponsoring the account.
  * @property {false} [useNativeCoins] - Whether to use native coins instead of a paymaster to pay for gas fees.
- * @property {string} [paymasterAddress] - Paymaster contract address (only required for unknown paymaster providers)
+ * @property {string} [paymasterAddress] - Custom deployment of a supported paymaster, so the fee decoder accepts it
  * @property {string} paymasterTokenAddress - The address of the paymaster token.
  * @property {number | bigint} [transferMaxFee] - Maximum fee for transfers
  * @property {number | bigint} [amountToApprove] - Amount to approve for paymaster
@@ -639,9 +639,8 @@ export default class WalletAccountReadOnlyMultisigSafe extends WalletAccountRead
   /**
    * Returns the maximum cost of executing a user operation, in the asset the Safe pays gas with: zero when the
    * operation is sponsored, paymaster token units when it pays with a token, and wei otherwise. Token amounts are
-   * decoded from the paymaster data the operation carries, so every owner sees the figure the proposer signed; some
-   * paymasters need one node call to name the token. The amount is a ceiling: the actual charge is usually well
-   * below it.
+   * decoded from the paymaster data the operation carries; some paymasters need one node call to name the token.
+   * The amount is a ceiling: the actual charge is usually well below it.
    *
    * @protected
    * @param {UserOperationV7} userOperation - The user operation to execute.
@@ -666,16 +665,6 @@ export default class WalletAccountReadOnlyMultisigSafe extends WalletAccountRead
     }
 
     return quote === null ? 0n : quote.maxTokenCost
-  }
-
-  /** @private */
-  _getTokenQuoteOverrides () {
-    const { paymasterAddress, paymasterUrl } = this._config
-    const provider = WalletAccountReadOnlyMultisigSafe._detectProvider(paymasterUrl)
-
-    if (paymasterAddress === undefined || provider === null) return undefined
-
-    return { paymasterAddresses: { [paymasterAddress]: { provider } } }
   }
 
   /**
@@ -900,6 +889,16 @@ export default class WalletAccountReadOnlyMultisigSafe extends WalletAccountRead
           }
         }
       : provider
+  }
+
+  /** @private */
+  _getTokenQuoteOverrides () {
+    const { paymasterAddress, paymasterUrl } = this._config
+    const provider = WalletAccountReadOnlyMultisigSafe._detectProvider(paymasterUrl)
+
+    if (paymasterAddress === undefined || provider === null) return undefined
+
+    return { paymasterAddresses: { [paymasterAddress]: { provider } } }
   }
 
   /** @private */

@@ -489,6 +489,9 @@ describe('WalletAccountReadOnlyMultisigSafe', () => {
 
     const loadFixture = (name) => JSON.parse(readFileSync(new URL(`./fixtures/${name}-sepolia.json`, import.meta.url), 'utf8'))
 
+    const PAYMASTER_TOKEN_ADDRESS = '0xd077A400968890Eacc75cdc901F0356c943e4fDb'
+    const PIMLICO_PAYMASTER_URL = 'https://api.pimlico.io/v2/11155111/rpc?apikey=dummy-key'
+
     // The candide paymaster names its token by an on-chain slot; decoding reads it with one eth_call.
     const CANDIDE_PAYMASTER_ADDRESS = '0x36f4aa64673568782461bf03c75462f8ef0a1b76'
     const CANDIDE_GET_TOKENS_CALL_DATA = '0x5ab244d9000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000001'
@@ -542,6 +545,33 @@ describe('WalletAccountReadOnlyMultisigSafe', () => {
 
       expect(requestMock).not.toHaveBeenCalled()
       expect(fee).toBe(3943524n)
+    })
+
+    test('should price an operation paid through a custom paymaster deployment registered with the paymasterAddress option', async () => {
+      const CUSTOM_PAYMASTER_ADDRESS = '0x' + 'cd'.repeat(20)
+      const { userOperation } = loadFixture('pimlico-token')
+      const account = createAccount(
+        { ...userOperation, paymasterAndData: CUSTOM_PAYMASTER_ADDRESS + userOperation.paymasterAndData.slice(42) },
+        { paymasterUrl: PIMLICO_PAYMASTER_URL, paymasterTokenAddress: PAYMASTER_TOKEN_ADDRESS, paymasterAddress: CUSTOM_PAYMASTER_ADDRESS }
+      )
+
+      const { fee } = await account.quoteExecuteProposal(MOCK_SAFE_OP_HASH)
+
+      expect(fee).toBe(3943524n)
+    })
+
+    test('should throw for a custom paymaster deployment that is not registered with the paymasterAddress option', async () => {
+      const CUSTOM_PAYMASTER_ADDRESS = '0x' + 'cd'.repeat(20)
+      const { userOperation } = loadFixture('pimlico-token')
+      const account = createAccount(
+        { ...userOperation, paymasterAndData: CUSTOM_PAYMASTER_ADDRESS + userOperation.paymasterAndData.slice(42) },
+        { paymasterUrl: PIMLICO_PAYMASTER_URL, paymasterTokenAddress: PAYMASTER_TOKEN_ADDRESS }
+      )
+
+      const promise = account.quoteExecuteProposal(MOCK_SAFE_OP_HASH)
+
+      await expect(promise).rejects.toThrow(AbstractionKitError)
+      await expect(promise).rejects.toThrow('is not a known token paymaster')
     })
 
     test('should return zero for a sponsored account whose paymaster is unknown to the decoder', async () => {
