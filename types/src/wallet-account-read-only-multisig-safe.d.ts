@@ -270,11 +270,13 @@ export default class WalletAccountReadOnlyMultisigSafe extends WalletAccountRead
      *
      * @protected
      * @param {UserOperationV7} userOperation - The user operation to execute.
+     * @param {MultisigSafeWalletConfig} [config] - The paymaster configuration the operation was built with (default:
+     *   the wallet account configuration).
      * @returns {Promise<bigint>} The maximum execution cost.
      * @throws {AbstractionKitError} If the operation uses a paymaster whose data cannot be decoded and the account is
      *   not sponsored.
      */
-    protected _getExecutionFee(userOperation: UserOperationV7): Promise<bigint>;
+    protected _getExecutionFee(userOperation: UserOperationV7, config?: MultisigSafeWalletConfig): Promise<bigint>;
     /**
      * Builds an unsigned UserOperation from the given transaction(s), applying the configured paymaster.
      *

@@ -127,6 +127,8 @@ export default class WalletAccountMultisigSafe extends WalletAccountReadOnlyMult
     proposeTransfer(transferOptions: TransferOptions, options?: MultisigTransactionOptions & Partial<MultisigSafeWalletPaymasterTokenConfig | MultisigSafeWalletSponsoredConfig | MultisigSafeWalletNativeCoinsConfig>): Promise<MultisigProposal & MultisigInteractionResult>;
     /** @private */
     private _submitTransaction;
+    /** @private */
+    private _executeProposal;
     /**
      * Proposes a new transaction for multisig approval.
      * Builds a UserOperation, signs it as the proposer, and shares it through the coordinator.
