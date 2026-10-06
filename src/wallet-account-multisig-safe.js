@@ -384,36 +384,7 @@ export default class WalletAccountMultisigSafe extends WalletAccountReadOnlyMult
    *   not sponsored.
    */
   async executeProposal (proposalId) {
-    const threshold = await this.getThreshold()
-    const safeOperationResponse = await this._coordinator.getProposal(proposalId)
-
-    if (!safeOperationResponse) {
-      throw new NoSuchElementError(`SafeOperation not found: ${proposalId}`)
-    }
-
-    const confirmations = safeOperationResponse.confirmations?.length || 0
-
-    if (confirmations < threshold) {
-      throw new ValueError(
-        `Not enough confirmations: ${confirmations}/${threshold}. ` +
-        `Need ${threshold - confirmations} more signature(s).`
-      )
-    }
-
-    const userOp = this._rebuildUserOperation(safeOperationResponse.userOperation)
-    this._verifyProposalId(proposalId, userOp)
-
-    userOp.signature = this._aggregateSignatures(safeOperationResponse)
-
-    const fee = await this._getExecutionFee(userOp)
-    const hash = await this._sendUserOperation(userOp)
-
-    this._resetState()
-
-    return {
-      hash,
-      fee
-    }
+    return await this._executeProposal(proposalId, this._config)
   }
 
   /**
@@ -608,11 +579,45 @@ export default class WalletAccountMultisigSafe extends WalletAccountReadOnlyMult
     const proposal = await this._propose(tx, config)
 
     if (autoExecute && proposal.confirmations >= proposal.threshold) {
-      const transaction = await this.executeProposal(proposal.proposalId)
+      const transaction = await this._executeProposal(proposal.proposalId, { ...this._config, ...config })
       return { ...proposal, status: 'executed', transaction }
     }
 
     return proposal
+  }
+
+  /** @private */
+  async _executeProposal (proposalId, config) {
+    const threshold = await this.getThreshold()
+    const safeOperationResponse = await this._coordinator.getProposal(proposalId)
+
+    if (!safeOperationResponse) {
+      throw new NoSuchElementError(`SafeOperation not found: ${proposalId}`)
+    }
+
+    const confirmations = safeOperationResponse.confirmations?.length || 0
+
+    if (confirmations < threshold) {
+      throw new ValueError(
+        `Not enough confirmations: ${confirmations}/${threshold}. ` +
+        `Need ${threshold - confirmations} more signature(s).`
+      )
+    }
+
+    const userOp = this._rebuildUserOperation(safeOperationResponse.userOperation)
+    this._verifyProposalId(proposalId, userOp)
+
+    userOp.signature = this._aggregateSignatures(safeOperationResponse)
+
+    const fee = await this._getExecutionFee(userOp, config)
+    const hash = await this._sendUserOperation(userOp)
+
+    this._resetState()
+
+    return {
+      hash,
+      fee
+    }
   }
 
   /** @private */

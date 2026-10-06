@@ -672,6 +672,29 @@ describe('WalletAccountMultisigSafe', () => {
       expect(result.transaction.hash).toBe(MOCK_USER_OP_HASH)
     })
 
+    test('should price the auto-executed operation with the paymaster override passed to propose', async () => {
+      account.quoteSendTransaction = jest.fn().mockResolvedValue({ fee: MOCK_FEE })
+      account._createSafeOperation = jest.fn().mockResolvedValue({ userOp: {}, smartAccount: createMockSmartAccount(), chainId: 11155111n })
+      account._getProposalId = jest.fn().mockReturnValue(MOCK_SAFE_OP_HASH)
+      account._coordinator = createMockCoordinator({
+        getProposal: jest.fn().mockResolvedValue({
+          confirmations: [{ owner: ACCOUNT.address }],
+          userOperation: { ...DUMMY_USER_OPERATION, paymasterAndData: '0x' + 'ab'.repeat(40) },
+          preparedSignature: '0xpreparedsignature'
+        })
+      })
+      account._getBundler = jest.fn().mockReturnValue(createMockBundler())
+      account._safeAddress = MOCK_SAFE_ADDRESS
+      account._threshold = 1
+      account.validateSignerIsOwner = jest.fn().mockResolvedValue(undefined)
+
+      const tx = { to: ACCOUNT_2.address, value: '1000', data: '0x' }
+      const result = await account.propose(tx, { autoExecute: true, paymasterUrl: 'https://paymaster.dummy-network.example/rpc?apikey=sponsor-key', isSponsored: true })
+
+      expect(result.status).toBe('executed')
+      expect(result.transaction).toEqual({ hash: MOCK_USER_OP_HASH, fee: 0n })
+    })
+
     test('should not auto-execute when threshold not met', async () => {
       account.quoteSendTransaction = jest.fn().mockResolvedValue({ fee: MOCK_FEE })
       account._createSafeOperation = jest.fn().mockResolvedValue({ userOp: {}, smartAccount: createMockSmartAccount(), chainId: 11155111n })

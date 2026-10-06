@@ -644,11 +644,13 @@ export default class WalletAccountReadOnlyMultisigSafe extends WalletAccountRead
    *
    * @protected
    * @param {UserOperationV7} userOperation - The user operation to execute.
+   * @param {MultisigSafeWalletConfig} [config] - The paymaster configuration the operation was built with (default:
+   *   the wallet account configuration).
    * @returns {Promise<bigint>} The maximum execution cost.
    * @throws {AbstractionKitError} If the operation uses a paymaster whose data cannot be decoded and the account is
    *   not sponsored.
    */
-  async _getExecutionFee (userOperation) {
+  async _getExecutionFee (userOperation, config = this._config) {
     if (!WalletAccountReadOnlyMultisigSafe._hasPaymaster(userOperation)) {
       return calculateUserOperationMaxGasCost(userOperation)
     }
@@ -656,11 +658,11 @@ export default class WalletAccountReadOnlyMultisigSafe extends WalletAccountRead
     let quote
 
     try {
-      quote = await Erc7677Paymaster.decodeTokenQuote(userOperation, this._provider, this._getTokenQuoteOverrides())
+      quote = await Erc7677Paymaster.decodeTokenQuote(userOperation, this._provider, this._getTokenQuoteOverrides(config))
     } catch (error) {
       // A paymaster the decoder does not know cannot be a token paymaster the Safe pays; when the account is
       // sponsored it is the sponsor, and the Safe pays nothing.
-      if (error instanceof AbstractionKitError && error.code === 'PAYMASTER_ERROR' && this._config.isSponsored) return 0n
+      if (error instanceof AbstractionKitError && error.code === 'PAYMASTER_ERROR' && config.isSponsored) return 0n
       throw error
     }
 
@@ -745,7 +747,7 @@ export default class WalletAccountReadOnlyMultisigSafe extends WalletAccountRead
     try {
       const buildResult = await this._buildUserOperation(calls, config, txOverrides)
 
-      const fee = await this._getExecutionFee(buildResult.userOp)
+      const fee = await this._getExecutionFee(buildResult.userOp, config)
 
       return { fee, ...buildResult }
     } catch (error) {
@@ -892,8 +894,8 @@ export default class WalletAccountReadOnlyMultisigSafe extends WalletAccountRead
   }
 
   /** @private */
-  _getTokenQuoteOverrides () {
-    const { paymasterAddress, paymasterUrl } = this._config
+  _getTokenQuoteOverrides (config) {
+    const { paymasterAddress, paymasterUrl } = config
     const provider = WalletAccountReadOnlyMultisigSafe._detectProvider(paymasterUrl)
 
     if (paymasterAddress === undefined || provider === null) return undefined
