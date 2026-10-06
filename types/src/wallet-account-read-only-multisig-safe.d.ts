@@ -265,9 +265,8 @@ export default class WalletAccountReadOnlyMultisigSafe extends WalletAccountRead
     /**
      * Returns the maximum cost of executing a user operation, in the asset the Safe pays gas with: zero when the
      * operation is sponsored, paymaster token units when it pays with a token, and wei otherwise. Token amounts are
-     * decoded from the paymaster data the operation carries, so every owner sees the figure the proposer signed; some
-     * paymasters need one node call to name the token. The amount is a ceiling: the actual charge is usually well
-     * below it.
+     * decoded from the paymaster data the operation carries; some paymasters need one node call to name the token.
+     * The amount is a ceiling: the actual charge is usually well below it.
      *
      * @protected
      * @param {UserOperationV7} userOperation - The user operation to execute.
@@ -276,8 +275,6 @@ export default class WalletAccountReadOnlyMultisigSafe extends WalletAccountRead
      *   not sponsored.
      */
     protected _getExecutionFee(userOperation: UserOperationV7): Promise<bigint>;
-    /** @private */
-    private _getTokenQuoteOverrides;
     /**
      * Builds an unsigned UserOperation from the given transaction(s), applying the configured paymaster.
      *
@@ -367,6 +364,8 @@ export default class WalletAccountReadOnlyMultisigSafe extends WalletAccountRead
     private _getExpectedSigners;
     /** @private */
     private _wrapEip1193Provider;
+    /** @private */
+    private _getTokenQuoteOverrides;
     /** @private */
     private _getPaymaster;
     /** @private */
@@ -484,7 +483,7 @@ export type MultisigSafeWalletPaymasterTokenConfig = {
      */
     useNativeCoins?: false;
     /**
-     * - Paymaster contract address (only required for unknown paymaster providers)
+     * - Custom deployment of a supported paymaster, so the fee decoder accepts it
      */
     paymasterAddress?: string;
     /**
