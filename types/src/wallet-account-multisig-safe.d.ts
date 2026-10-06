@@ -169,7 +169,8 @@ export default class WalletAccountMultisigSafe extends WalletAccountReadOnlyMult
      * @throws {NoSuchElementError} If no proposal exists for the given id.
      * @throws {ValueError} If the proposal does not have enough confirmations to meet the threshold.
      * @throws {HashMismatchError} If the proposal returned by the coordinator does not hash to the requested id.
-     * @throws {InvalidTokenError} If the paymaster does not support the token in the 'paymasterTokenAddress' option.
+     * @throws {AbstractionKitError} If the operation uses a paymaster whose data cannot be decoded and the account is
+     *   not sponsored.
      */
     executeProposal(proposalId: string): Promise<TransactionResult>;
     /**

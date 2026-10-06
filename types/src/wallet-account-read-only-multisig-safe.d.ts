@@ -250,7 +250,8 @@ export default class WalletAccountReadOnlyMultisigSafe extends WalletAccountRead
      * @param {string} proposalId - The proposal's id
      * @returns {Promise<Omit<TransactionResult, 'hash'>>} The execution cost estimate
      * @throws {NoSuchElementError} If no proposal exists for the given id.
-     * @throws {InvalidTokenError} If the paymaster does not support the token in the 'paymasterTokenAddress' option.
+     * @throws {AbstractionKitError} If the operation uses a paymaster whose data cannot be decoded and the account is
+     *   not sponsored.
      */
     quoteExecuteProposal(proposalId: string): Promise<Omit<TransactionResult, "hash">>;
     /**
@@ -263,19 +264,20 @@ export default class WalletAccountReadOnlyMultisigSafe extends WalletAccountRead
     protected _rebuildUserOperation(userOperation: UserOperationV7): UserOperationV7;
     /**
      * Returns the maximum cost of executing a user operation, in the asset the Safe pays gas with: zero when the
-     * account is sponsored, paymaster token units when the account pays with a token and the operation carries a
-     * paymaster, and wei otherwise.
+     * operation is sponsored, paymaster token units when it pays with a token, and wei otherwise. Token amounts are
+     * decoded from the paymaster data the operation carries, so every owner sees the figure the proposer signed; some
+     * paymasters need one node call to name the token. The amount is a ceiling: the actual charge is usually well
+     * below it.
      *
      * @protected
      * @param {UserOperationV7} userOperation - The user operation to execute.
      * @returns {Promise<bigint>} The maximum execution cost.
-     * @throws {InvalidTokenError} If the paymaster does not support the token in the 'paymasterTokenAddress' option.
+     * @throws {AbstractionKitError} If the operation uses a paymaster whose data cannot be decoded and the account is
+     *   not sponsored.
      */
     protected _getExecutionFee(userOperation: UserOperationV7): Promise<bigint>;
     /** @private */
-    private _fetchPaymasterExchangeRate;
-    /** @private */
-    private _getMaxGasCost;
+    private _getTokenQuoteOverrides;
     /**
      * Builds an unsigned UserOperation from the given transaction(s), applying the configured paymaster.
      *
