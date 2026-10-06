@@ -40,8 +40,6 @@ import WalletAccountReadOnlyMultisigSafe from './wallet-account-read-only-multis
 /** @typedef {import('@tetherto/wdk-wallet/multisig').MultisigSignature} MultisigSignature */
 /** @typedef {import('@tetherto/wdk-wallet/multisig').MultisigOptions} MultisigOptions */
 
-/** @typedef {import('@tetherto/wdk-wallet').InvalidTokenError} InvalidTokenError */
-
 /** @typedef {import('@tetherto/wdk-wallet-evm').KeyPair} KeyPair */
 
 /** @typedef {import('@tetherto/wdk-wallet-evm').EvmTransaction} EvmTransaction */
@@ -382,7 +380,8 @@ export default class WalletAccountMultisigSafe extends WalletAccountReadOnlyMult
    * @throws {NoSuchElementError} If no proposal exists for the given id.
    * @throws {ValueError} If the proposal does not have enough confirmations to meet the threshold.
    * @throws {HashMismatchError} If the proposal returned by the coordinator does not hash to the requested id.
-   * @throws {InvalidTokenError} If the paymaster does not support the token in the 'paymasterTokenAddress' option.
+   * @throws {AbstractionKitError} If the operation uses a paymaster whose data cannot be decoded and the account is
+   *   not sponsored.
    */
   async executeProposal (proposalId) {
     const threshold = await this.getThreshold()

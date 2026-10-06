@@ -14,6 +14,8 @@
 
 'use strict'
 
+import { readFileSync } from 'node:fs'
+
 import * as bip39 from 'bip39'
 
 import { TypedDataEncoder } from 'ethers'
@@ -537,12 +539,9 @@ describe('WalletAccountMultisigSafe', () => {
 
     describe('when the Safe pays gas with a paymaster token', () => {
       const PAYMASTER_URL = 'https://api.candide.dev/paymaster/v3/sepolia/dummy-key'
-      const PAYMASTER_TOKEN_ADDRESS = '0x1234567890AbcdEF1234567890aBcdef12345678'
-      const ENTRY_POINT_ADDRESS = '0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789'
-      const DUMMY_SUPPORTED_TOKENS = {
-        paymasterMetadata: { address: '0x' + 'cd'.repeat(20) },
-        tokens: [{ address: PAYMASTER_TOKEN_ADDRESS.toLowerCase(), exchangeRate: '0x77359400' }]
-      }
+      const PAYMASTER_TOKEN_ADDRESS = '0xd077A400968890Eacc75cdc901F0356c943e4fDb'
+      const DUMMY_USER_OPERATION = JSON.parse(readFileSync(new URL('./fixtures/candide-token-sepolia.json', import.meta.url), 'utf8')).userOperation
+      const DUMMY_GET_TOKENS_RESULT = '0x000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000020000000000000000000000000d077a400968890eacc75cdc901f0356c943e4fdb000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000a000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000005afd67f2dc0e1b2e0000000000000000000000000000000000000000000000000000000000000000000000'
 
       let erc20Account
 
@@ -559,26 +558,23 @@ describe('WalletAccountMultisigSafe', () => {
         erc20Account.dispose()
       })
 
-      test('should return the fee in token units', async () => {
-        const EXPECTED_FEE = 900000n
+      test('should return the token maximum signed into the operation', async () => {
+        const EXPECTED_FEE = 2764597n
 
-        const sendRPCRequestMock = jest.fn().mockResolvedValue(DUMMY_SUPPORTED_TOKENS)
         erc20Account._coordinator = createMockCoordinator({
           getProposal: jest.fn().mockResolvedValue({
             confirmations: [{ owner: ACCOUNT.address }],
-            userOperation: { ...DUMMY_USER_OPERATION, paymasterAndData: '0x' + 'ab'.repeat(40) },
+            userOperation: DUMMY_USER_OPERATION,
             preparedSignature: '0xpreparedsignature'
           })
         })
         erc20Account._getProposalId = jest.fn().mockReturnValue(MOCK_SAFE_OP_HASH)
         erc20Account._getBundler = jest.fn().mockReturnValue(createMockBundler())
-        erc20Account._getPaymaster = jest.fn().mockReturnValue({ sendRPCRequest: sendRPCRequestMock })
+        erc20Account._provider = { request: jest.fn().mockResolvedValue(DUMMY_GET_TOKENS_RESULT) }
         erc20Account._threshold = 1
 
         const result = await erc20Account.executeProposal(MOCK_SAFE_OP_HASH)
 
-        expect(erc20Account._getPaymaster).toHaveBeenCalledWith(PAYMASTER_URL, { chainId: 11155111n })
-        expect(sendRPCRequestMock).toHaveBeenCalledWith('pm_supportedERC20Tokens', [ENTRY_POINT_ADDRESS])
         expect(result).toEqual({ hash: MOCK_USER_OP_HASH, fee: EXPECTED_FEE })
       })
     })

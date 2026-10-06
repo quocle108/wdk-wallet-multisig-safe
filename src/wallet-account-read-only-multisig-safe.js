@@ -14,9 +14,9 @@
 
 'use strict'
 
-import { keccak256, toUtf8Bytes, hashMessage, Interface, JsonRpcProvider, toQuantity } from 'ethers'
+import { keccak256, toUtf8Bytes, hashMessage, Interface, JsonRpcProvider } from 'ethers'
 
-import { WalletAccountReadOnly, InvalidTokenError, NoSuchElementError, ValueError } from '@tetherto/wdk-wallet'
+import { WalletAccountReadOnly, NoSuchElementError, ValueError } from '@tetherto/wdk-wallet'
 
 import { WalletAccountReadOnlyEvm } from '@tetherto/wdk-wallet-evm'
 
@@ -136,9 +136,6 @@ const PaymasterMode = {
 }
 
 const EIP1271_MAGIC_VALUE = '0x1626ba7e'
-
-// Paymaster exchange rates are scaled by 10^18: the value of one native coin in the token's smallest unit.
-const EXCHANGE_RATE_SCALE = 10n ** 18n
 
 /**
  * Read-only multisig Safe wallet account.
@@ -601,7 +598,8 @@ export default class WalletAccountReadOnlyMultisigSafe extends WalletAccountRead
    * @param {string} proposalId - The proposal's id
    * @returns {Promise<Omit<TransactionResult, 'hash'>>} The execution cost estimate
    * @throws {NoSuchElementError} If no proposal exists for the given id.
-   * @throws {InvalidTokenError} If the paymaster does not support the token in the 'paymasterTokenAddress' option.
+   * @throws {AbstractionKitError} If the operation uses a paymaster whose data cannot be decoded and the account is
+   *   not sponsored.
    */
   async quoteExecuteProposal (proposalId) {
     const safeOperation = await this._coordinator.getProposal(proposalId)
@@ -640,58 +638,44 @@ export default class WalletAccountReadOnlyMultisigSafe extends WalletAccountRead
 
   /**
    * Returns the maximum cost of executing a user operation, in the asset the Safe pays gas with: zero when the
-   * account is sponsored, paymaster token units when the account pays with a token and the operation carries a
-   * paymaster, and wei otherwise.
+   * operation is sponsored, paymaster token units when it pays with a token, and wei otherwise. Token amounts are
+   * decoded from the paymaster data the operation carries, so every owner sees the figure the proposer signed; some
+   * paymasters need one node call to name the token. The amount is a ceiling: the actual charge is usually well
+   * below it.
    *
    * @protected
    * @param {UserOperationV7} userOperation - The user operation to execute.
    * @returns {Promise<bigint>} The maximum execution cost.
-   * @throws {InvalidTokenError} If the paymaster does not support the token in the 'paymasterTokenAddress' option.
+   * @throws {AbstractionKitError} If the operation uses a paymaster whose data cannot be decoded and the account is
+   *   not sponsored.
    */
   async _getExecutionFee (userOperation) {
-    const maxGasCost = this._getMaxGasCost(userOperation)
+    if (!WalletAccountReadOnlyMultisigSafe._hasPaymaster(userOperation)) {
+      return calculateUserOperationMaxGasCost(userOperation)
+    }
 
-    if (!WalletAccountReadOnlyMultisigSafe._hasPaymaster(userOperation)) return maxGasCost
+    let quote
 
-    const mode = WalletAccountReadOnlyMultisigSafe._resolvePaymasterMode(this._config)
+    try {
+      quote = await Erc7677Paymaster.decodeTokenQuote(userOperation, this._provider, this._getTokenQuoteOverrides())
+    } catch (error) {
+      // A paymaster the decoder does not know cannot be a token paymaster the Safe pays; when the account is
+      // sponsored it is the sponsor, and the Safe pays nothing.
+      if (error instanceof AbstractionKitError && error.code === 'PAYMASTER_ERROR' && this._config.isSponsored) return 0n
+      throw error
+    }
 
-    if (mode === PaymasterMode.SPONSORED) return 0n
-    if (mode === PaymasterMode.NATIVE) return maxGasCost
-
-    const exchangeRate = await this._fetchPaymasterExchangeRate()
-
-    return exchangeRate === null ? maxGasCost : exchangeRate * maxGasCost / EXCHANGE_RATE_SCALE
+    return quote === null ? 0n : quote.maxTokenCost
   }
 
   /** @private */
-  async _fetchPaymasterExchangeRate () {
-    const { paymasterUrl, paymasterTokenAddress, chainId } = this._config
+  _getTokenQuoteOverrides () {
+    const { paymasterAddress, paymasterUrl } = this._config
     const provider = WalletAccountReadOnlyMultisigSafe._detectProvider(paymasterUrl)
 
-    if (provider === null) return null
+    if (paymasterAddress === undefined || provider === null) return undefined
 
-    const paymaster = this._getPaymaster(paymasterUrl, { chainId: BigInt(chainId) })
-    const entrypoint = this._entryPointAddress()
-
-    if (provider === 'pimlico') {
-      const params = [{ tokens: [paymasterTokenAddress] }, entrypoint, toQuantity(chainId)]
-      const { quotes } = await paymaster.sendRPCRequest('pimlico_getTokenQuotes', params)
-      return WalletAccountReadOnlyMultisigSafe._findExchangeRate('token', paymasterTokenAddress, quotes)
-    }
-
-    const { tokens } = await paymaster.sendRPCRequest('pm_supportedERC20Tokens', [entrypoint])
-    return WalletAccountReadOnlyMultisigSafe._findExchangeRate('address', paymasterTokenAddress, tokens)
-  }
-
-  /** @private */
-  _getMaxGasCost (userOperation) {
-    const cost = calculateUserOperationMaxGasCost(userOperation)
-
-    if (!WalletAccountReadOnlyMultisigSafe._hasPaymaster(userOperation)) {
-      return cost + userOperation.verificationGasLimit * userOperation.maxFeePerGas
-    }
-
-    return cost
+    return { paymasterAddresses: { [paymasterAddress]: { provider } } }
   }
 
   /**
@@ -772,9 +756,7 @@ export default class WalletAccountReadOnlyMultisigSafe extends WalletAccountRead
     try {
       const buildResult = await this._buildUserOperation(calls, config, txOverrides)
 
-      const fee = buildResult.tokenQuote
-        ? buildResult.tokenQuote.tokenCost
-        : this._getMaxGasCost(buildResult.userOp)
+      const fee = await this._getExecutionFee(buildResult.userOp)
 
       return { fee, ...buildResult }
     } catch (error) {
@@ -992,17 +974,6 @@ export default class WalletAccountReadOnlyMultisigSafe extends WalletAccountRead
   /** @private */
   static _hasPaymaster (userOperation) {
     return userOperation.paymasterAndData !== undefined && userOperation.paymasterAndData !== '0x'
-  }
-
-  /** @private */
-  static _findExchangeRate (addressField, tokenAddress, quotes) {
-    const quote = quotes.find(candidate => candidate[addressField].toLowerCase() === tokenAddress.toLowerCase())
-
-    if (quote === undefined) {
-      throw new InvalidTokenError(`The paymaster does not support the token set in the 'paymasterTokenAddress' option: ${tokenAddress}.`)
-    }
-
-    return BigInt(quote.exchangeRate)
   }
 
   /** @private */
