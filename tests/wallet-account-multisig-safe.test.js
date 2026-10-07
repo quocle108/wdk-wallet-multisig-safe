@@ -14,6 +14,8 @@
 
 'use strict'
 
+import { readFileSync } from 'node:fs'
+
 import * as bip39 from 'bip39'
 
 import { TypedDataEncoder } from 'ethers'
@@ -83,20 +85,24 @@ const createMockSmartAccount = (overrides = {}) => ({
   ...overrides
 })
 
+const DUMMY_USER_OPERATION = {
+  nonce: '0',
+  initCode: '0x',
+  callGasLimit: '100000',
+  verificationGasLimit: '100000',
+  preVerificationGas: '50000',
+  maxFeePerGas: '1000000000',
+  maxPriorityFeePerGas: '1000000000',
+  paymasterAndData: '0x',
+  paymasterVerificationGasLimit: '0',
+  paymasterPostOpGasLimit: '0'
+}
+
 const createMockCoordinator = (overrides = {}) => ({
   submitProposal: jest.fn().mockResolvedValue(undefined),
   getProposal: jest.fn().mockResolvedValue({
     confirmations: [{ owner: ACCOUNT.address }],
-    userOperation: {
-      nonce: '0',
-      callGasLimit: '100000',
-      verificationGasLimit: '100000',
-      preVerificationGas: '50000',
-      maxFeePerGas: '1000000000',
-      maxPriorityFeePerGas: '1000000000',
-      paymasterVerificationGasLimit: '0',
-      paymasterPostOpGasLimit: '0'
-    },
+    userOperation: DUMMY_USER_OPERATION,
     preparedSignature: '0xpreparedsignature'
   }),
   confirmProposal: jest.fn().mockResolvedValue(undefined),
@@ -518,7 +524,9 @@ describe('WalletAccountMultisigSafe', () => {
   })
 
   describe('executeProposal', () => {
-    test('should return execute result with hash', async () => {
+    test('should return the execution hash and the fee in wei when the Safe pays with native coins', async () => {
+      const EXPECTED_FEE = 250000000000000n
+
       account._coordinator = createMockCoordinator()
       account._getProposalId = jest.fn().mockReturnValue(MOCK_SAFE_OP_HASH)
       account._getBundler = jest.fn().mockReturnValue(createMockBundler())
@@ -526,7 +534,49 @@ describe('WalletAccountMultisigSafe', () => {
 
       const result = await account.executeProposal(MOCK_SAFE_OP_HASH)
 
-      expect(result.hash).toBe(MOCK_USER_OP_HASH)
+      expect(result).toEqual({ hash: MOCK_USER_OP_HASH, fee: EXPECTED_FEE })
+    })
+
+    describe('when the Safe pays gas with a paymaster token', () => {
+      const PAYMASTER_URL = 'https://api.candide.dev/paymaster/v3/sepolia/dummy-key'
+      const PAYMASTER_TOKEN_ADDRESS = '0xd077A400968890Eacc75cdc901F0356c943e4fDb'
+      const DUMMY_TOKEN_USER_OPERATION = JSON.parse(readFileSync(new URL('./fixtures/candide-token-sepolia.json', import.meta.url), 'utf8')).userOperation
+      const DUMMY_GET_TOKENS_RESULT = '0x000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000020000000000000000000000000d077a400968890eacc75cdc901f0356c943e4fdb000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000a000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000005afd67f2dc0e1b2e0000000000000000000000000000000000000000000000000000000000000000000000'
+
+      let erc20Account
+
+      beforeEach(() => {
+        erc20Account = new WalletAccountMultisigSafe(SEED_PHRASE, "0'/0/0", {
+          ...MOCK_CONFIG,
+          paymasterUrl: PAYMASTER_URL,
+          paymasterTokenAddress: PAYMASTER_TOKEN_ADDRESS,
+          safeOptions: { owners: [ACCOUNT.address], threshold: 1 }
+        })
+      })
+
+      afterEach(() => {
+        erc20Account.dispose()
+      })
+
+      test('should return the token maximum signed into the operation', async () => {
+        const EXPECTED_FEE = 2764597n
+
+        erc20Account._coordinator = createMockCoordinator({
+          getProposal: jest.fn().mockResolvedValue({
+            confirmations: [{ owner: ACCOUNT.address }],
+            userOperation: DUMMY_TOKEN_USER_OPERATION,
+            preparedSignature: '0xpreparedsignature'
+          })
+        })
+        erc20Account._getProposalId = jest.fn().mockReturnValue(MOCK_SAFE_OP_HASH)
+        erc20Account._getBundler = jest.fn().mockReturnValue(createMockBundler())
+        erc20Account._provider = { request: jest.fn().mockResolvedValue(DUMMY_GET_TOKENS_RESULT) }
+        erc20Account._threshold = 1
+
+        const result = await erc20Account.executeProposal(MOCK_SAFE_OP_HASH)
+
+        expect(result).toEqual({ hash: MOCK_USER_OP_HASH, fee: EXPECTED_FEE })
+      })
     })
 
     test('should call sendUserOperation on the bundler', async () => {
@@ -620,6 +670,29 @@ describe('WalletAccountMultisigSafe', () => {
       expect(result.threshold).toBe(1)
       expect(result.status).toBe('executed')
       expect(result.transaction.hash).toBe(MOCK_USER_OP_HASH)
+    })
+
+    test('should price the auto-executed operation with the paymaster override passed to propose', async () => {
+      account.quoteSendTransaction = jest.fn().mockResolvedValue({ fee: MOCK_FEE })
+      account._createSafeOperation = jest.fn().mockResolvedValue({ userOp: {}, smartAccount: createMockSmartAccount(), chainId: 11155111n })
+      account._getProposalId = jest.fn().mockReturnValue(MOCK_SAFE_OP_HASH)
+      account._coordinator = createMockCoordinator({
+        getProposal: jest.fn().mockResolvedValue({
+          confirmations: [{ owner: ACCOUNT.address }],
+          userOperation: { ...DUMMY_USER_OPERATION, paymasterAndData: '0x' + 'ab'.repeat(40) },
+          preparedSignature: '0xpreparedsignature'
+        })
+      })
+      account._getBundler = jest.fn().mockReturnValue(createMockBundler())
+      account._safeAddress = MOCK_SAFE_ADDRESS
+      account._threshold = 1
+      account.validateSignerIsOwner = jest.fn().mockResolvedValue(undefined)
+
+      const tx = { to: ACCOUNT_2.address, value: '1000', data: '0x' }
+      const result = await account.propose(tx, { autoExecute: true, paymasterUrl: 'https://paymaster.dummy-network.example/rpc?apikey=sponsor-key', isSponsored: true })
+
+      expect(result.status).toBe('executed')
+      expect(result.transaction).toEqual({ hash: MOCK_USER_OP_HASH, fee: 0n })
     })
 
     test('should not auto-execute when threshold not met', async () => {

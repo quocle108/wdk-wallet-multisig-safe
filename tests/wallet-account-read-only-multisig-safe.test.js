@@ -18,6 +18,10 @@ import { describe, expect, test, jest } from '@jest/globals'
 
 import { AbiCoder } from 'ethers'
 
+import { readFileSync } from 'node:fs'
+
+import { AbstractionKitError } from 'abstractionkit'
+
 import { WalletAccountReadOnlyMultisigSafe, SafeTxServiceCoordinator } from '../index.js'
 
 const ACCOUNT = {
@@ -470,32 +474,124 @@ describe('WalletAccountReadOnlyMultisigSafe', () => {
   })
 
   describe('quoteExecuteProposal', () => {
-    test('should include verificationGasLimit in the prefund quote for a no-paymaster operation', async () => {
+    const DUMMY_USER_OPERATION = {
+      nonce: '0',
+      initCode: '0x',
+      callGasLimit: '100000',
+      verificationGasLimit: '200000',
+      preVerificationGas: '50000',
+      maxFeePerGas: '1000000000',
+      maxPriorityFeePerGas: '1000000000',
+      paymasterAndData: '0x',
+      paymasterVerificationGasLimit: '0',
+      paymasterPostOpGasLimit: '0'
+    }
+
+    const loadFixture = (name) => JSON.parse(readFileSync(new URL(`./fixtures/${name}-sepolia.json`, import.meta.url), 'utf8'))
+
+    const PAYMASTER_TOKEN_ADDRESS = '0xd077A400968890Eacc75cdc901F0356c943e4fDb'
+    const PIMLICO_PAYMASTER_URL = 'https://api.pimlico.io/v2/11155111/rpc?apikey=dummy-key'
+
+    // The candide paymaster names its token by an on-chain slot; decoding reads it with one eth_call.
+    const CANDIDE_PAYMASTER_ADDRESS = '0x36f4aa64673568782461bf03c75462f8ef0a1b76'
+    const CANDIDE_GET_TOKENS_CALL_DATA = '0x5ab244d9000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000001'
+    const DUMMY_GET_TOKENS_RESULT = '0x000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000020000000000000000000000000d077a400968890eacc75cdc901f0356c943e4fdb000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000a000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000005afd67f2dc0e1b2e0000000000000000000000000000000000000000000000000000000000000000000000'
+
+    const createAccount = (userOperation, config = {}) => {
       const account = new WalletAccountReadOnlyMultisigSafe({
         ...MOCK_CONFIG,
+        ...config,
         safeOptions: { safeAddress: MOCK_SAFE_ADDRESS }
       })
-      account._coordinator = {
-        getProposal: jest.fn().mockResolvedValue({
-          userOperation: {
-            nonce: '0',
-            initCode: '0x',
-            callGasLimit: '100000',
-            verificationGasLimit: '200000',
-            preVerificationGas: '50000',
-            maxFeePerGas: '1000000000',
-            maxPriorityFeePerGas: '1000000000',
-            paymasterAndData: '0x',
-            paymasterVerificationGasLimit: '0',
-            paymasterPostOpGasLimit: '0'
-          }
-        })
-      }
+      account._coordinator = { getProposal: jest.fn().mockResolvedValue({ userOperation }) }
+      return account
+    }
+
+    test('should include verificationGasLimit in the prefund quote for a no-paymaster operation', async () => {
+      const account = createAccount(DUMMY_USER_OPERATION)
 
       const { fee } = await account.quoteExecuteProposal(MOCK_SAFE_OP_HASH)
 
       expect(fee).toBe(350000000000000n)
       expect(account._coordinator.getProposal).toHaveBeenCalledWith(MOCK_SAFE_OP_HASH)
+    })
+
+    test('should return zero for a sponsored operation', async () => {
+      const account = createAccount(loadFixture('candide-sponsored').userOperation)
+
+      const { fee } = await account.quoteExecuteProposal(MOCK_SAFE_OP_HASH)
+
+      expect(fee).toBe(0n)
+    })
+
+    test('should return the token maximum signed into an operation paid through a candide paymaster', async () => {
+      const account = createAccount(loadFixture('candide-token').userOperation)
+      const requestMock = jest.fn().mockResolvedValue(DUMMY_GET_TOKENS_RESULT)
+      account._provider = { request: requestMock }
+
+      const { fee } = await account.quoteExecuteProposal(MOCK_SAFE_OP_HASH)
+
+      // The node transport is called with the EIP-1193 request and an undefined options slot.
+      expect(requestMock).toHaveBeenCalledWith({ method: 'eth_call', params: [{ to: CANDIDE_PAYMASTER_ADDRESS, data: CANDIDE_GET_TOKENS_CALL_DATA }, 'latest'] }, undefined)
+      expect(fee).toBe(2764597n)
+    })
+
+    test('should return the token maximum signed into an operation paid through a pimlico paymaster without touching the node', async () => {
+      const account = createAccount(loadFixture('pimlico-token').userOperation)
+      const requestMock = jest.fn()
+      account._provider = { request: requestMock }
+
+      const { fee } = await account.quoteExecuteProposal(MOCK_SAFE_OP_HASH)
+
+      expect(requestMock).not.toHaveBeenCalled()
+      expect(fee).toBe(3943524n)
+    })
+
+    test('should price an operation paid through a custom paymaster deployment registered with the paymasterAddress option', async () => {
+      const CUSTOM_PAYMASTER_ADDRESS = '0x' + 'cd'.repeat(20)
+      const { userOperation } = loadFixture('pimlico-token')
+      const account = createAccount(
+        { ...userOperation, paymasterAndData: CUSTOM_PAYMASTER_ADDRESS + userOperation.paymasterAndData.slice(42) },
+        { paymasterUrl: PIMLICO_PAYMASTER_URL, paymasterTokenAddress: PAYMASTER_TOKEN_ADDRESS, paymasterAddress: CUSTOM_PAYMASTER_ADDRESS }
+      )
+
+      const { fee } = await account.quoteExecuteProposal(MOCK_SAFE_OP_HASH)
+
+      expect(fee).toBe(3943524n)
+    })
+
+    test('should throw for a custom paymaster deployment that is not registered with the paymasterAddress option', async () => {
+      const CUSTOM_PAYMASTER_ADDRESS = '0x' + 'cd'.repeat(20)
+      const { userOperation } = loadFixture('pimlico-token')
+      const account = createAccount(
+        { ...userOperation, paymasterAndData: CUSTOM_PAYMASTER_ADDRESS + userOperation.paymasterAndData.slice(42) },
+        { paymasterUrl: PIMLICO_PAYMASTER_URL, paymasterTokenAddress: PAYMASTER_TOKEN_ADDRESS }
+      )
+
+      const promise = account.quoteExecuteProposal(MOCK_SAFE_OP_HASH)
+
+      await expect(promise).rejects.toThrow(AbstractionKitError)
+      await expect(promise).rejects.toThrow('is not a known token paymaster')
+    })
+
+    test('should return zero for a sponsored account whose paymaster is unknown to the decoder', async () => {
+      const account = createAccount(
+        { ...DUMMY_USER_OPERATION, paymasterAndData: '0x' + 'ab'.repeat(40) },
+        { paymasterUrl: 'https://paymaster.dummy-network.example/rpc?apikey=dummy-key', isSponsored: true }
+      )
+
+      const { fee } = await account.quoteExecuteProposal(MOCK_SAFE_OP_HASH)
+
+      expect(fee).toBe(0n)
+    })
+
+    test('should throw if the operation uses an unknown paymaster', async () => {
+      const account = createAccount({ ...DUMMY_USER_OPERATION, paymasterAndData: '0x' + 'ab'.repeat(40) })
+
+      const promise = account.quoteExecuteProposal(MOCK_SAFE_OP_HASH)
+
+      await expect(promise).rejects.toThrow(AbstractionKitError)
+      await expect(promise).rejects.toThrow('is not a known token paymaster')
     })
   })
 

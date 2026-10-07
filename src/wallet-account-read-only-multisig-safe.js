@@ -93,7 +93,7 @@ import { ConfigurationError } from './errors.js'
  * @typedef {Object} MultisigSafeWalletPaymasterTokenConfig
  * @property {false} [isSponsored] - Whether the paymaster is sponsoring the account.
  * @property {false} [useNativeCoins] - Whether to use native coins instead of a paymaster to pay for gas fees.
- * @property {string} [paymasterAddress] - Paymaster contract address (only required for unknown paymaster providers)
+ * @property {string} [paymasterAddress] - Custom deployment of a supported paymaster, so the fee decoder accepts it
  * @property {string} paymasterTokenAddress - The address of the paymaster token.
  * @property {number | bigint} [transferMaxFee] - Maximum fee for transfers
  * @property {number | bigint} [amountToApprove] - Amount to approve for paymaster
@@ -592,11 +592,14 @@ export default class WalletAccountReadOnlyMultisigSafe extends WalletAccountRead
   }
 
   /**
-   * Quotes the on-chain cost of executing a pending proposal.
+   * Quotes the on-chain cost of executing a pending proposal. The fee is expressed in the asset the Safe pays gas
+   * with: zero when sponsored, paymaster token units when paying with a token, wei otherwise.
    *
    * @param {string} proposalId - The proposal's id
    * @returns {Promise<Omit<TransactionResult, 'hash'>>} The execution cost estimate
    * @throws {NoSuchElementError} If no proposal exists for the given id.
+   * @throws {AbstractionKitError} If the operation uses a paymaster whose data cannot be decoded and the account is
+   *   not sponsored.
    */
   async quoteExecuteProposal (proposalId) {
     const safeOperation = await this._coordinator.getProposal(proposalId)
@@ -607,7 +610,7 @@ export default class WalletAccountReadOnlyMultisigSafe extends WalletAccountRead
 
     const userOp = this._rebuildUserOperation(safeOperation.userOperation)
 
-    return { fee: this._getMaxGasCost(userOp) }
+    return { fee: await this._getExecutionFee(userOp) }
   }
 
   /**
@@ -633,16 +636,37 @@ export default class WalletAccountReadOnlyMultisigSafe extends WalletAccountRead
     }
   }
 
-  /** @private */
-  _getMaxGasCost (userOperation) {
-    const cost = calculateUserOperationMaxGasCost(userOperation)
-    const hasPaymaster = userOperation.paymasterAndData !== undefined && userOperation.paymasterAndData !== '0x'
-
-    if (!hasPaymaster) {
-      return cost + userOperation.verificationGasLimit * userOperation.maxFeePerGas
+  /**
+   * Returns the maximum cost of executing a user operation, in the asset the Safe pays gas with: zero when the
+   * operation is sponsored, paymaster token units when it pays with a token, and wei otherwise. Token amounts are
+   * decoded from the paymaster data the operation carries; some paymasters need one node call to name the token.
+   * The amount is a ceiling: the actual charge is usually well below it.
+   *
+   * @protected
+   * @param {UserOperationV7} userOperation - The user operation to execute.
+   * @param {MultisigSafeWalletConfig} [config] - The paymaster configuration the operation was built with (default:
+   *   the wallet account configuration).
+   * @returns {Promise<bigint>} The maximum execution cost.
+   * @throws {AbstractionKitError} If the operation uses a paymaster whose data cannot be decoded and the account is
+   *   not sponsored.
+   */
+  async _getExecutionFee (userOperation, config = this._config) {
+    if (!WalletAccountReadOnlyMultisigSafe._hasPaymaster(userOperation)) {
+      return calculateUserOperationMaxGasCost(userOperation)
     }
 
-    return cost
+    let quote
+
+    try {
+      quote = await Erc7677Paymaster.decodeTokenQuote(userOperation, this._provider, this._getTokenQuoteOverrides(config))
+    } catch (error) {
+      // A paymaster the decoder does not know cannot be a token paymaster the Safe pays; when the account is
+      // sponsored it is the sponsor, and the Safe pays nothing.
+      if (error instanceof AbstractionKitError && error.code === 'PAYMASTER_ERROR' && config.isSponsored) return 0n
+      throw error
+    }
+
+    return quote === null ? 0n : quote.maxTokenCost
   }
 
   /**
@@ -723,9 +747,7 @@ export default class WalletAccountReadOnlyMultisigSafe extends WalletAccountRead
     try {
       const buildResult = await this._buildUserOperation(calls, config, txOverrides)
 
-      const fee = buildResult.tokenQuote
-        ? buildResult.tokenQuote.tokenCost
-        : this._getMaxGasCost(buildResult.userOp)
+      const fee = await this._getExecutionFee(buildResult.userOp, config)
 
       return { fee, ...buildResult }
     } catch (error) {
@@ -872,6 +894,16 @@ export default class WalletAccountReadOnlyMultisigSafe extends WalletAccountRead
   }
 
   /** @private */
+  _getTokenQuoteOverrides (config) {
+    const { paymasterAddress, paymasterUrl } = config
+    const provider = WalletAccountReadOnlyMultisigSafe._detectProvider(paymasterUrl)
+
+    if (paymasterAddress === undefined || provider === null) return undefined
+
+    return { paymasterAddresses: { [paymasterAddress]: { provider } } }
+  }
+
+  /** @private */
   _getPaymaster (url, options = {}) {
     if (!this._paymasters.has(url)) {
       const provider = WalletAccountReadOnlyMultisigSafe._detectProvider(url)
@@ -938,6 +970,11 @@ export default class WalletAccountReadOnlyMultisigSafe extends WalletAccountRead
     }
 
     return overrides
+  }
+
+  /** @private */
+  static _hasPaymaster (userOperation) {
+    return userOperation.paymasterAndData !== undefined && userOperation.paymasterAndData !== '0x'
   }
 
   /** @private */

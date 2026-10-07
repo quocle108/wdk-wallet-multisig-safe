@@ -198,6 +198,8 @@ const result = await alice.propose({
 
 The Safe pays gas fees using ERC-20 tokens (e.g., USDT). The Safe must hold sufficient tokens.
 
+Every fee this package reports is a maximum. In this mode it is the most the paymaster can charge for the operation, in token units, decoded from the signed operation itself so that every owner sees the same figure. Display it as "up to": the actual charge is usually well below it.
+
 ```javascript
 const alice = new WalletAccountMultisigSafe(aliceSeed, "0'/0/0", {
   provider: 'https://your-rpc-provider.example',
