@@ -78,7 +78,12 @@ console.log('Is Deployed:', isDeployed)
 - `new WalletAccountMultisigSafe(seed, path, config)` — standard BIP-44 derivation
 - `new WalletAccountMultisigSafe(walletAccountEvm, config)` — wrap an existing `WalletAccountEvm`
 
-With the second form the Safe owner can be backed by any signer the wallet-evm account supports, such as an external custody provider implementing `ISignerEvm`.
+With the second form the Safe owner can be backed by any signer the wallet-evm account supports, such as an external custody provider implementing `ISignerEvm`. The argument must be a `WalletAccountEvm` wrapping the signer, not the signer itself.
+
+Two things to keep in mind with a wrapped account:
+
+- `deploy()` sends the deployment transaction through the wrapped account, so it must be connected to a provider on the same chain as `chainId`. Proposals and executions go through the bundler and do not need it.
+- `index` and `path` are `undefined` when the signer is not derived from a seed (e.g. a private-key or custody signer), and `keyPair` throws when the signer does not expose its key material.
 
 ```javascript
 import { WalletAccountEvm } from '@tetherto/wdk-wallet-evm'

@@ -48,6 +48,8 @@ import WalletAccountReadOnlyMultisigSafe from './wallet-account-read-only-multis
 
 /** @typedef {import('abstractionkit').UserOperationV7} UserOperationV7 */
 
+/** @typedef {import('./errors.js').ConfigurationError} ConfigurationError */
+
 /** @typedef {import('./wallet-account-read-only-multisig-safe.js').MultisigSafeWalletConfig} MultisigSafeWalletConfig */
 /** @typedef {import('./wallet-account-read-only-multisig-safe.js').MultisigSafeWalletPaymasterTokenConfig} MultisigSafeWalletPaymasterTokenConfig */
 /** @typedef {import('./wallet-account-read-only-multisig-safe.js').MultisigSafeWalletSponsoredConfig} MultisigSafeWalletSponsoredConfig */
@@ -70,22 +72,26 @@ export default class WalletAccountMultisigSafe extends WalletAccountReadOnlyMult
    * @param {string | Uint8Array} seed - A [BIP-39](https://github.com/bitcoin/bips/blob/master/bip-0039.mediawiki) mnemonic seed phrase, or a raw BIP-32 master seed (16-64 bytes).
    * @param {string} path - The BIP-44 derivation path (e.g., "0'/0/0")
    * @param {MultisigSafeWalletConfig} config - The configuration object
+   * @throws {Error} If the seed is not a valid BIP-39 mnemonic.
+   * @throws {ConfigurationError} If the configuration is invalid or has missing required fields.
    */
 
   /**
    * Creates a new multisig Safe wallet account from a wallet-evm account. The account acts as the Safe owner, so
-   * the owner can be backed by any signer the wallet-evm account supports.
+   * the owner can be backed by any signer the wallet-evm account supports. To call `deploy`, the account must be
+   * connected to a provider on the same chain as the one in the configuration.
    *
    * @overload
    * @param {WalletAccountEvm} account - The wallet-evm account.
    * @param {MultisigSafeWalletConfig} config - The configuration object
+   * @throws {ConfigurationError} If the configuration is invalid or has missing required fields.
    */
   constructor (seedOrAccount, pathOrConfig, config) {
-    const isExternalAccount = seedOrAccount instanceof WalletAccountEvm
+    const isSeed = typeof seedOrAccount === 'string' || seedOrAccount instanceof Uint8Array
 
-    const [signerAccount, resolvedConfig] = isExternalAccount
-      ? [seedOrAccount, pathOrConfig]
-      : [new WalletAccountEvm(seedOrAccount, pathOrConfig, config), config]
+    const [signerAccount, resolvedConfig] = isSeed
+      ? [new WalletAccountEvm(seedOrAccount, pathOrConfig, config), config]
+      : [seedOrAccount, pathOrConfig]
 
     super(resolvedConfig)
 
@@ -105,18 +111,13 @@ export default class WalletAccountMultisigSafe extends WalletAccountReadOnlyMult
      */
     this._signerAccount = signerAccount
 
-    /**
-     * Whether the signer account was supplied by the caller. Caller-supplied accounts are not disposed by this
-     * account, since their lifecycle belongs to the caller.
-     *
-     * @private
-     * @type {boolean}
-     */
-    this._isExternalSignerAccount = isExternalAccount
+    /** @private */
+    this._isExternalSignerAccount = !isSeed
   }
 
   /**
-   * The derivation path's index of this account.
+   * The derivation path's index of this account, or `undefined` when the owner account is backed by a signer that is
+   * not derived from a seed.
    *
    * @type {number}
    */
@@ -125,7 +126,8 @@ export default class WalletAccountMultisigSafe extends WalletAccountReadOnlyMult
   }
 
   /**
-   * The derivation path of this account (see [BIP-44](https://github.com/bitcoin/bips/blob/master/bip-0044.mediawiki)).
+   * The derivation path of this account (see [BIP-44](https://github.com/bitcoin/bips/blob/master/bip-0044.mediawiki)),
+   * or `undefined` when the owner account is backed by a signer that is not derived from a seed.
    *
    * @type {string}
    */
@@ -137,6 +139,7 @@ export default class WalletAccountMultisigSafe extends WalletAccountReadOnlyMult
    * The key pair of this account.
    *
    * @type {KeyPair}
+   * @throws {Error} If the owner account is backed by a signer that does not expose its key material.
    */
   get keyPair () {
     return this._signerAccount.keyPair
@@ -266,6 +269,7 @@ export default class WalletAccountMultisigSafe extends WalletAccountReadOnlyMult
    *
    * @returns {Promise<TransactionResult>} Deployment result with transaction hash and fee
    * @throws {Error} If Safe is already deployed
+   * @throws {Error} If the owner account is not connected to a provider.
    */
   async deploy () {
     const isDeployed = await this.isDeployed()
@@ -541,7 +545,8 @@ export default class WalletAccountMultisigSafe extends WalletAccountReadOnlyMult
   }
 
   /**
-   * Disposes the wallet account, clearing sensitive data from memory.
+   * Disposes the wallet account, clearing sensitive data from memory. A caller-supplied owner account is left
+   * untouched, since its lifecycle belongs to the caller.
    */
   dispose () {
     if (this._signerAccount && !this._isExternalSignerAccount) {
