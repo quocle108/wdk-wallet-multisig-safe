@@ -28,6 +28,14 @@ export default class WalletAccountMultisigSafe extends WalletAccountReadOnlyMult
      */
     constructor(seed: string | Uint8Array, path: string, config: MultisigSafeWalletConfig);
     /**
+     * Creates a new multisig Safe wallet account from a wallet-evm account. The account acts as the Safe owner, so
+     * the owner can be backed by any signer the wallet-evm account supports.
+     *
+     * @param {WalletAccountEvm} account - The wallet-evm account.
+     * @param {MultisigSafeWalletConfig} config - The configuration object
+     */
+    constructor(account: WalletAccountEvm, config: MultisigSafeWalletConfig);
+    /**
      * The signer account.
      *
      * @private
@@ -35,12 +43,13 @@ export default class WalletAccountMultisigSafe extends WalletAccountReadOnlyMult
      */
     private _signerAccount;
     /**
-     * The derivation path.
+     * Whether the signer account was supplied by the caller. Caller-supplied accounts are not disposed by this
+     * account, since their lifecycle belongs to the caller.
      *
      * @private
-     * @type {string}
+     * @type {boolean}
      */
-    private _path;
+    private _isExternalSignerAccount;
     /**
      * The derivation path's index of the signer associated with this account.
      *
@@ -263,4 +272,5 @@ export type MultisigSafeWalletConfig = import("./wallet-account-read-only-multis
 export type MultisigSafeWalletPaymasterTokenConfig = import("./wallet-account-read-only-multisig-safe.js").MultisigSafeWalletPaymasterTokenConfig;
 export type MultisigSafeWalletSponsoredConfig = import("./wallet-account-read-only-multisig-safe.js").MultisigSafeWalletSponsoredConfig;
 export type MultisigSafeWalletNativeCoinsConfig = import("./wallet-account-read-only-multisig-safe.js").MultisigSafeWalletNativeCoinsConfig;
+import { WalletAccountEvm } from '@tetherto/wdk-wallet-evm';
 import WalletAccountReadOnlyMultisigSafe from './wallet-account-read-only-multisig-safe.js';

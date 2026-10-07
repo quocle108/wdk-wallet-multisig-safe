@@ -22,6 +22,8 @@ import { TypedDataEncoder } from 'ethers'
 
 import { afterEach, beforeEach, describe, expect, test, jest } from '@jest/globals'
 
+import { WalletAccountEvm } from '@tetherto/wdk-wallet-evm'
+
 import {
   WalletAccountMultisigSafe,
   WalletAccountReadOnlyMultisigSafe
@@ -143,8 +145,30 @@ describe('WalletAccountMultisigSafe', () => {
   describe('constructor', () => {
     test('should successfully initialize with seed phrase and path', () => {
       expect(account).toBeDefined()
-      expect(account._signerAccount).toBeDefined()
-      expect(account._path).toBe("0'/0/0")
+      expect(account._signerAccount).toBeInstanceOf(WalletAccountEvm)
+      expect(account._isExternalSignerAccount).toBe(false)
+      expect(account.path).toBe(ACCOUNT.path)
+    })
+
+    test('should successfully initialize an account from an existing WalletAccountEvm', async () => {
+      const ownerAccount = new WalletAccountEvm(SEED_PHRASE, "0'/0/0", { provider: MOCK_CONFIG.provider })
+      const externalAccount = new WalletAccountMultisigSafe(ownerAccount, {
+        ...MOCK_CONFIG,
+        safeOptions: {
+          owners: [ACCOUNT.address],
+          threshold: 1
+        }
+      })
+
+      expect(externalAccount._signerAccount).toBe(ownerAccount)
+      expect(externalAccount._isExternalSignerAccount).toBe(true)
+      expect(externalAccount._config.chainId).toBe(MOCK_CONFIG.chainId)
+      expect(externalAccount.index).toBe(ACCOUNT.index)
+      expect(externalAccount.path).toBe(ACCOUNT.path)
+      expect(await externalAccount.getSignerAddress()).toBe(ACCOUNT.address)
+
+      externalAccount.dispose()
+      ownerAccount.dispose()
     })
 
     test('should successfully initialize with ERC-20 paymaster options', () => {
@@ -372,6 +396,44 @@ describe('WalletAccountMultisigSafe', () => {
 
       expect(testAccount._signerAccount).toBe(null)
       expect(testAccount._coordinator).toBe(null)
+    })
+
+    test('should dispose the signer account derived from the seed', () => {
+      const testAccount = new WalletAccountMultisigSafe(SEED_PHRASE, "0'/0/0", {
+        ...MOCK_CONFIG,
+        safeOptions: {
+          owners: [ACCOUNT.address],
+          threshold: 1
+        }
+      })
+      const signerAccount = testAccount._signerAccount
+      const disposeSpy = jest.spyOn(signerAccount, 'dispose')
+
+      testAccount.dispose()
+
+      expect(disposeSpy).toHaveBeenCalledTimes(1)
+      expect(testAccount._signerAccount).toBe(null)
+    })
+
+    test('should not dispose a caller-supplied wallet-evm account', async () => {
+      const ownerAccount = new WalletAccountEvm(SEED_PHRASE, "0'/0/0", { provider: MOCK_CONFIG.provider })
+      const disposeSpy = jest.spyOn(ownerAccount, 'dispose')
+      const testAccount = new WalletAccountMultisigSafe(ownerAccount, {
+        ...MOCK_CONFIG,
+        safeOptions: {
+          owners: [ACCOUNT.address],
+          threshold: 1
+        }
+      })
+
+      testAccount.dispose()
+
+      expect(disposeSpy).not.toHaveBeenCalled()
+      expect(testAccount._signerAccount).toBe(null)
+      expect(testAccount._coordinator).toBe(null)
+      expect(await ownerAccount.getAddress()).toBe(ACCOUNT.address)
+
+      ownerAccount.dispose()
     })
 
     test('should be safe to call dispose twice', () => {

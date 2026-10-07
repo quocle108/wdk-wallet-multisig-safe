@@ -66,14 +66,28 @@ export default class WalletAccountMultisigSafe extends WalletAccountReadOnlyMult
   /**
    * Creates a new multisig Safe wallet account.
    *
+   * @overload
    * @param {string | Uint8Array} seed - A [BIP-39](https://github.com/bitcoin/bips/blob/master/bip-0039.mediawiki) mnemonic seed phrase, or a raw BIP-32 master seed (16-64 bytes).
    * @param {string} path - The BIP-44 derivation path (e.g., "0'/0/0")
    * @param {MultisigSafeWalletConfig} config - The configuration object
    */
-  constructor (seed, path, config) {
-    const signerAccount = new WalletAccountEvm(seed, path, config)
 
-    super(config)
+  /**
+   * Creates a new multisig Safe wallet account from a wallet-evm account. The account acts as the Safe owner, so
+   * the owner can be backed by any signer the wallet-evm account supports.
+   *
+   * @overload
+   * @param {WalletAccountEvm} account - The wallet-evm account.
+   * @param {MultisigSafeWalletConfig} config - The configuration object
+   */
+  constructor (seedOrAccount, pathOrConfig, config) {
+    const isExternalAccount = seedOrAccount instanceof WalletAccountEvm
+
+    const [signerAccount, resolvedConfig] = isExternalAccount
+      ? [seedOrAccount, pathOrConfig]
+      : [new WalletAccountEvm(seedOrAccount, pathOrConfig, config), config]
+
+    super(resolvedConfig)
 
     /**
      * The multisig Safe configuration.
@@ -81,7 +95,7 @@ export default class WalletAccountMultisigSafe extends WalletAccountReadOnlyMult
      * @protected
      * @type {MultisigSafeWalletConfig}
      */
-    this._config = config
+    this._config = resolvedConfig
 
     /**
      * The signer account.
@@ -92,12 +106,13 @@ export default class WalletAccountMultisigSafe extends WalletAccountReadOnlyMult
     this._signerAccount = signerAccount
 
     /**
-     * The derivation path.
+     * Whether the signer account was supplied by the caller. Caller-supplied accounts are not disposed by this
+     * account, since their lifecycle belongs to the caller.
      *
      * @private
-     * @type {string}
+     * @type {boolean}
      */
-    this._path = path
+    this._isExternalSignerAccount = isExternalAccount
   }
 
   /**
@@ -529,10 +544,10 @@ export default class WalletAccountMultisigSafe extends WalletAccountReadOnlyMult
    * Disposes the wallet account, clearing sensitive data from memory.
    */
   dispose () {
-    if (this._signerAccount) {
+    if (this._signerAccount && !this._isExternalSignerAccount) {
       this._signerAccount.dispose()
-      this._signerAccount = null
     }
+    this._signerAccount = null
     this._paymasters.clear()
     this._bundler = undefined
     this._deployedSmartAccount = undefined

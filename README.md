@@ -71,6 +71,42 @@ const isDeployed = await alice.isDeployed()
 console.log('Is Deployed:', isDeployed)
 ```
 
+### Wrapping an Existing WalletAccountEvm
+
+`WalletAccountMultisigSafe` has two constructor overloads:
+
+- `new WalletAccountMultisigSafe(seed, path, config)` — standard BIP-44 derivation
+- `new WalletAccountMultisigSafe(walletAccountEvm, config)` — wrap an existing `WalletAccountEvm`
+
+With the second form the Safe owner can be backed by any signer the wallet-evm account supports, such as an external custody provider implementing `ISignerEvm`.
+
+```javascript
+import { WalletAccountEvm } from '@tetherto/wdk-wallet-evm'
+import { WalletAccountMultisigSafe } from '@tetherto/wdk-wallet-multisig-safe'
+
+// Any ISignerEvm implementation (hardware wallet, MPC provider, backend signer, ...)
+const externalSigner = new MyCustodySigner({ /* ... */ })
+
+const ownerAccount = new WalletAccountEvm(externalSigner, {
+  provider: 'https://your-rpc-provider.example'
+})
+
+const alice = new WalletAccountMultisigSafe(ownerAccount, {
+  provider: 'https://your-rpc-provider.example',
+  bundlerUrl: 'https://your-aa-provider.example/rpc?apikey=YOUR_KEY',
+  chainId: 11155111n,
+  safeApiKey: 'YOUR_SAFE_API_KEY',
+  safeOptions: {
+    owners: [await ownerAccount.getAddress(), bobEoa],
+    threshold: 2
+  }
+})
+
+// The caller owns the lifecycle of ownerAccount: alice.dispose() leaves it untouched
+alice.dispose()
+ownerAccount.dispose()
+```
+
 ### Importing an Existing Safe
 
 ```javascript
