@@ -36,30 +36,30 @@ export default class WalletAccountMultisigSafe extends WalletAccountReadOnlyMult
      * connected to a provider on the same chain as the one in the configuration.
      *
      * @overload
-     * @param {WalletAccountEvm} account - The wallet-evm account.
+     * @param {MultisigSafeOwnerAccount} account - The owner account that signs this instance's proposals, approvals and
+     *   messages, and sends the deployment transaction.
      * @param {MultisigSafeWalletConfig} config - The configuration object
      * @throws {ConfigurationError} If the configuration is invalid or has missing required fields.
      */
-    constructor(account: WalletAccountEvm, config: MultisigSafeWalletConfig);
+    constructor(account: MultisigSafeOwnerAccount, config: MultisigSafeWalletConfig);
     /**
      * The signer account.
      *
      * @private
-     * @type {WalletAccountEvm}
+     * @type {MultisigSafeOwnerAccount}
      */
     private _signerAccount;
     /** @private */
     private _isExternalSignerAccount;
     /**
-     * The derivation path's index of this account, or `undefined` when the owner account is backed by a signer that is
-     * not derived from a seed.
+     * The derivation path's index of this account, or `undefined` when the owner account does not expose one.
      *
      * @type {number}
      */
     get index(): number;
     /**
      * The derivation path of this account (see [BIP-44](https://github.com/bitcoin/bips/blob/master/bip-0044.mediawiki)),
-     * or `undefined` when the owner account is backed by a signer that is not derived from a seed.
+     * or `undefined` when the owner account does not expose one.
      *
      * @type {string}
      */
@@ -68,7 +68,7 @@ export default class WalletAccountMultisigSafe extends WalletAccountReadOnlyMult
      * The key pair of this account.
      *
      * @type {KeyPair}
-     * @throws {Error} If the owner account is backed by a signer that does not expose its key material.
+     * @throws {Error} If the owner account does not expose its key material.
      */
     get keyPair(): KeyPair;
     /**
@@ -277,5 +277,10 @@ export type MultisigSafeWalletConfig = import("./wallet-account-read-only-multis
 export type MultisigSafeWalletPaymasterTokenConfig = import("./wallet-account-read-only-multisig-safe.js").MultisigSafeWalletPaymasterTokenConfig;
 export type MultisigSafeWalletSponsoredConfig = import("./wallet-account-read-only-multisig-safe.js").MultisigSafeWalletSponsoredConfig;
 export type MultisigSafeWalletNativeCoinsConfig = import("./wallet-account-read-only-multisig-safe.js").MultisigSafeWalletNativeCoinsConfig;
+/**
+ * An account that can act as one of the Safe's owners, including one from another installed copy of
+ * @tetherto/wdk-wallet-evm.
+ */
+export type MultisigSafeOwnerAccount = Pick<WalletAccountEvm, 'getAddress' | 'signTypedData' | 'sendTransaction'>;
 import { WalletAccountEvm } from '@tetherto/wdk-wallet-evm';
 import WalletAccountReadOnlyMultisigSafe from './wallet-account-read-only-multisig-safe.js';

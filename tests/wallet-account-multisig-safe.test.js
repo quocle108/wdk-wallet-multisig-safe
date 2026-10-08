@@ -736,6 +736,24 @@ describe('WalletAccountMultisigSafe', () => {
       })
     })
 
+    test('should throw if the owner account is not connected to a provider', async () => {
+      const ownerAccount = new WalletAccountEvm(SEED_PHRASE, "0'/0/0")
+      const externalAccount = new WalletAccountMultisigSafe(ownerAccount, {
+        ...MOCK_CONFIG,
+        safeOptions: {
+          owners: [ACCOUNT.address],
+          threshold: 1
+        }
+      })
+      externalAccount.isDeployed = jest.fn().mockResolvedValue(false)
+
+      await expect(externalAccount.deploy())
+        .rejects.toThrow('The wallet must be connected to a provider to send transactions.')
+
+      externalAccount.dispose()
+      ownerAccount.dispose()
+    })
+
     test('should throw if Safe is already deployed', async () => {
       account.isDeployed = jest.fn().mockResolvedValue(true)
 
